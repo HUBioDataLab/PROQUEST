@@ -1,4 +1,4 @@
-# ProQuest: Protein Querying Using Semantic Technology
+# ProQuest: Protein Querying Using Semantic Technology for developing the UniProtKB LLM Query Interface
 
 ## Abstract
 
