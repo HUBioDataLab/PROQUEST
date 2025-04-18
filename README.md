@@ -1,4 +1,4 @@
-# Protein Querying Using Semantic Technology
+# ProQuest: Protein Querying Using Semantic Technology
 ## Application Setup and Run Instructions
 
 Follow these steps to set up and run the application on **Windows** and **macOS** systems.
