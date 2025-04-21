@@ -30,6 +30,16 @@ logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="ProQuest", layout="wide")
 
+# Session state başlatmaları
+if 'log_stream' not in st.session_state:
+    st.session_state.log_stream = io.StringIO()
+
+# VECTOR SEARCH için session state
+if 'sequence_input' not in st.session_state:
+    st.session_state.sequence_input = ""
+if 'trigger_example_search' not in st.session_state:
+    st.session_state.trigger_example_search = False
+
 tabs = st.tabs(["LLM Query", "Vector Search"]) # two modes
 
 sqliteDb = "asset/protein_index.db"
@@ -47,6 +57,15 @@ st.sidebar.info(
     "and their related Gene Ontology terms, accelerating protein-related research and analysis."
 )
 
+st.sidebar.title("Team Members")
+with st.sidebar:
+    st.markdown("""<div style="background-color:#FAEBD7; padding:10px; border-radius:5px;">
+                    <p style="margin-bottom: 0; color: black;">- Sezin Yavuz</p>
+                    <p style="margin-bottom: 0; color: black;">- Rauf Yanmaz</p>
+                    <p style="margin-bottom: 0; color: black;">- Melike Akkaya</p>
+                    <p style="margin-bottom: 0; color: black;">- Tunca Doğan</p>
+                    <p style="margin-bottom: 0; color: black;">  <strong>Hacettepe University, Department of Computer Science</strong></p>
+                  </div>""", unsafe_allow_html=True)
 
 with tabs[0]: # LLM Query Tab
     with st.spinner("Loading required fields..."):
@@ -196,16 +215,45 @@ with tabs[0]: # LLM Query Tab
 with tabs[1]:  # Vector Search Tab
     st.title("🔎 ProQuest: Vector Search v0.2")
 
+    EXAMPLE_SEQUENCE = """MTAIIKEIVSRNKRRYQEDGFDLDLTYIYPNIIAMGFPAERLEGVYRNNIDDVVRFLDSK\nHKNHYKIYNLCAERHYDTAKFNCRVAQYPFEDHNPPQLELIKPFCEDLDQWLSEDDNHVA\nAIHCKAGKGRTGVMICAYLLHRGKFLKAQEALDFYGEVRTRDKKGVTIPSQRRYVYYYSY\nLLKNHLDYRPVALLFHKMMFETIPMFSGGTCNPQFVVCQLKVKIYSSNSGPTRREDKFMY\nFEFPQPLPVCGDIKVEFFHKQNKMLKKDKMFHFWVNTFFIPGPEETSEKVENGSLCDQEI\nDSICSIERADNDKEYLVLTLTKNDLDKANKDKANRYFSPNFKVKLYFTKTVEEPSNPEAS\nSSTSVTPDVSDNEPDHYRYSDTTDSDPENEPFDEDQHTQITKV"""
+
+    # example sequence
+    col1, col2 = st.columns([3, 2])
+    with col1:
+        if st.button("🔬 Load an example sequence"):
+            st.session_state.sequence_input = EXAMPLE_SEQUENCE
+            st.session_state.trigger_example_search = True
+
+
     with st.form("vector_search_form"):
         sequence_input = st.text_area(
             "Enter your protein sequence:",
-            placeholder="e.g., MKTFFVAGVLAALATA..."
+            placeholder="e.g., MKTFFVAGVLAALATA...",
+            #added
+            key="sequence_input"
         )
 
         search_button = st.form_submit_button("Search")
 
+    if st.session_state.trigger_example_search:
+        search_button = True
+        st.session_state.trigger_example_search = False  
+    
+
     if search_button:
         if sequence_input:
+            # ───  PREPROCESS FASTA ────────────────────────────────────────
+            raw = sequence_input.strip()
+            if raw.startswith(">"):
+                seq = "".join(
+                    line.strip()
+                    for line in raw.splitlines()
+                    if line and not line.startswith(">")
+                )
+                st.info("Detected FASTA header – stripping it out.")
+            else:
+                seq = raw.replace("\n", "").strip()
+
             st.subheader("Search Results:")
             st.write("🔄 Searching for similar protein sequences...")
 
@@ -220,9 +268,9 @@ with tabs[1]:  # Vector Search Tab
             foundEmbeddings = searchSpecificEmbedding(query_embedding)
             endTimeToFindByEmbedding = datetime.now()
 
-            # distance should be in the range: 0 <= distance <= 0.7765
-            # therefore similarity should be in the range: 1 >= similarity >= 0.2235
-            foundEmbeddings = foundEmbeddings[(foundEmbeddings['Similarity'] >= 0.2235) & (foundEmbeddings['Similarity'] <= 1.0)]
+            # distance should be in the range: 0 <= distance <= 0.40
+            # therefore similarity should be in the range: 1 >= similarity >= 0.60
+            foundEmbeddings = foundEmbeddings[(foundEmbeddings['Similarity'] >= 0.60) & (foundEmbeddings['Similarity'] <= 1.0)]
 
             embeddingTime = endTimeToCreateEmbedding - startTimeToCreateEmbedding
             searchTime = endTimeToFindByEmbedding - startTimeToFindByEmbedding
@@ -237,49 +285,56 @@ with tabs[1]:  # Vector Search Tab
                 st.success("✅ Similar proteins found!")
                 st.write("Distance Metric: Angular")
 
-                # distance should be in the range: 0 <= distance <= 0.65
-                # therefore similarity should be in the range: 1 >= similarity >= 0.35
-                foundEmbeddings = foundEmbeddings[(foundEmbeddings['Similarity'] >= 0.35)]
+                # distance should be in the range: 0 <= distance <= 0.25
+                # therefore similarity should be in the range: 1 >= similarity >= 0.75
+                foundEmbeddings = foundEmbeddings[(foundEmbeddings['Similarity'] >= 0.75)]
                 proteinIdList = foundEmbeddings['Protein ID'].str.extract(r'>(.+)<')[0].fillna(foundEmbeddings['Protein ID']).tolist()
                 go_enrichment_df = findRelatedGoIds(proteinIdList, dbPath=sqliteDb)
 
                 with st.expander("📊 View GO Term Enrichment Table"):
+                    for namespace in go_enrichment_df['Namespace'].unique():
+                        st.markdown(f"#### Namespace: {namespace} (Selected enriched terms)")
+                        df_ns = go_enrichment_df[go_enrichment_df['Namespace'] == namespace].head(10).copy()
+
+                        df_ns['Associated Protein IDs'] = df_ns['Associated Protein IDs'].apply(
+                            lambda x: ', '.join(x.split(', ')[:5]) + "..." 
+                                      if len(x.split(', ')) > 5 else x
+                        )
+
+                        df_ns["GO ID"] = go_enrichment_df["GO ID"].apply(
+                            lambda go: f'<a href="https://www.ebi.ac.uk/QuickGO/term/{go}" target="_blank">{go}</a>'
+                        )
+
+                        df_ns.index = range(1, len(df_ns) + 1)
+
+                        html_table = df_ns.to_html(escape=False, index=True)
+                        html_table = html_table.replace(
+                            "<th>Definition</th>",
+                            "<th style='max-width: 250px; word-wrap: break-word;'>Definition</th>"
+                        )
+                        scrollable = f"""
+                        <div style="overflow-x: auto; width: 100%; margin-bottom: 1em;">
+                          <table style="min-width: 1800px; width: 100%; border-collapse: collapse; font-size: 14px;">
+                            {''.join(html_table.splitlines()[1:])}
+                          </table>
+                        </div>
+                        """
+                        st.markdown(scrollable, unsafe_allow_html=True)
+                    
                     # download GO term table
                     csv_go = go_enrichment_df.to_csv(index=True)
                     st.download_button(
-                        label="Download GO Term Enrichment Table as CSV",
+                        label="Download the Whole GO Term Enrichment Table as CSV",
                         data=csv_go,
                         file_name="go_enrichment_table.csv",
                         mime="text/csv"
                     )
                     st.caption("Download operation will reset the page!") 
-                    go_enrichment_df["GO ID"] = go_enrichment_df["GO ID"].apply(
-                        lambda go: f'<a href="https://www.ebi.ac.uk/QuickGO/term/{go}" target="_blank">{go}</a>'
-                    )
-                    # update to show at most 5 associated proteins
-                    go_enrichment_df.index = range(1, len(go_enrichment_df) + 1)
-                    go_enrichment_df['Associated Protein IDs'] = go_enrichment_df['Associated Protein IDs'].apply(
-                        lambda x: ', '.join(x.split(', ')[:5]) + "..." if len(x.split(', ')) > 5 else x
-                    )
-
-                    html_table = go_enrichment_df.to_html(escape=False, index=True)
-                    html_table = html_table.replace(
-                        "<th>Definition</th>",
-                        "<th style='max-width: 250px; word-wrap: break-word;'>Definition</th>"
-                    )
-                    scrollable_html = f"""
-                    <div style="overflow-x: auto; width: 100%;">
-                        <table style="min-width: 1800px; width: 100%; border-collapse: collapse; font-size: 14px;">
-                            {''.join(html_table.splitlines()[1:])}
-                        </table>
-                    </div>
-                    """
-                    st.markdown(scrollable_html, unsafe_allow_html=True)
 
                 foundEmbeddings_download = foundEmbeddings.copy()
                 csv_found = foundEmbeddings_download.to_csv(index=False)
                 st.download_button(
-                    label="Download Similar Proteins Table as CSV",
+                    label="Download Protein Hits Table as CSV",
                     data=csv_found,
                     file_name="similar_proteins_table.csv",
                     mime="text/csv"
